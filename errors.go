@@ -1,4 +1,4 @@
-package sftp
+package main
 
 type fxerr uint32
 

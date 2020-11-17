@@ -1,4 +1,4 @@
-package sftp
+package main
 
 // AuthenticationRequest ... An authentication request to the SFTP server.
 type AuthenticationRequest struct {
