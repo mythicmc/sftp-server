@@ -1,12 +1,14 @@
-package sftp_server
+package sftp
 
 import (
 	"io"
 	"os"
 )
 
+// ListerAt ... A list of files.
 type ListerAt []os.FileInfo
 
+// ListAt ...
 // Returns the number of entries copied and an io.EOF error if we made it to the end of the file list.
 // Take a look at the pkg/sftp godoc for more information about how this function should work.
 func (l ListerAt) ListAt(f []os.FileInfo, offset int64) (int, error) {
@@ -14,9 +16,9 @@ func (l ListerAt) ListAt(f []os.FileInfo, offset int64) (int, error) {
 		return 0, io.EOF
 	}
 
-	if n := copy(f, l[offset:]); n < len(f) {
+	n := copy(f, l[offset:])
+	if n < len(f) {
 		return n, io.EOF
-	} else {
-		return n, nil
 	}
+	return n, nil
 }

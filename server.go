@@ -1,4 +1,4 @@
-package sftp_server
+package sftp
 
 import (
 	"crypto/rand"
@@ -6,10 +6,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"github.com/patrickmn/go-cache"
-	"github.com/pkg/sftp"
-	"go.uber.org/zap"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"io/ioutil"
 	"net"
@@ -17,8 +13,14 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/patrickmn/go-cache"
+	"github.com/pkg/sftp"
+	"go.uber.org/zap"
+	"golang.org/x/crypto/ssh"
 )
 
+// Settings ... SFTP server settings.
 type Settings struct {
 	BasePath    string
 	ReadOnly    bool
@@ -26,21 +28,23 @@ type Settings struct {
 	BindAddress string
 }
 
-type SftpUser struct {
-	Uid int
-	Gid int
+// User ... A local OS user.
+type User struct {
+	UID int
+	GID int
 }
 
+// Server ... An instance of the SFTP server.
 type Server struct {
 	// A custom logger instance that should be used by the server.
 	logger *zap.SugaredLogger
 	cache  *cache.Cache
 
 	Settings Settings
-	User     SftpUser
+	User     User
 
-	PathValidator      func(fs FileSystem, p string) (string, error)
-	DiskSpaceValidator func(fs FileSystem) bool
+	PathValidator      func(fs *FileSystem, p string) (string, error)
+	DiskSpaceValidator func(fs *FileSystem) bool
 
 	// Validator function that is called when a user connects to the server. This should
 	// check against whatever system is desired to confirm if the given username and password
@@ -48,12 +52,12 @@ type Server struct {
 	CredentialValidator func(r AuthenticationRequest) (*AuthenticationResponse, error)
 }
 
-// Create a new server configuration instance.
+// New ... Create a new server configuration instance.
 func New(c *Server) error {
-	if logger, err := zap.NewProduction(); err != nil {
-		return err
-	} else {
+	if logger, err := zap.NewProduction(); err == nil {
 		c.logger = logger.Sugar()
+	} else {
+		return err
 	}
 
 	c.cache = cache.New(5*time.Minute, 10*time.Minute)
@@ -61,7 +65,7 @@ func New(c *Server) error {
 	return nil
 }
 
-// Allows configuration of a custom logger.
+// ConfigureLogger ... Allows configuration of a custom logger.
 func (c *Server) ConfigureLogger(cb func() *zap.SugaredLogger) {
 	c.logger = cb()
 }
@@ -132,8 +136,8 @@ func (c *Server) Initialize() error {
 	}
 }
 
-// Handles an inbound connection to the instance and determines if we should serve the request
-// or not.
+// AcceptInboundConnection ... Handles an inbound connection to the instance and determines if
+// we should serve the request  or not.
 func (c Server) AcceptInboundConnection(conn net.Conn, config *ssh.ServerConfig) {
 	defer conn.Close()
 
@@ -209,10 +213,10 @@ func (c Server) createHandler(perm *ssh.Permissions) sftp.Handlers {
 	}
 
 	return sftp.Handlers{
-		FileGet:  p,
-		FilePut:  p,
-		FileCmd:  p,
-		FileList: p,
+		FileGet:  &p,
+		FilePut:  &p,
+		FileCmd:  &p,
+		FileList: &p,
 	}
 }
 

@@ -1,44 +1,51 @@
-package sftp_server
+package sftp
 
 import (
-	"github.com/patrickmn/go-cache"
-	"github.com/pkg/sftp"
-	"go.uber.org/zap"
 	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/patrickmn/go-cache"
+	"github.com/pkg/sftp"
+	"go.uber.org/zap"
 )
 
+// FileSystem ... A file system exposed to a user.
 type FileSystem struct {
 	UUID        string
 	Permissions []string
 	ReadOnly    bool
-	User        SftpUser
+	User        User
 	Cache       *cache.Cache
 
-	PathValidator func(fs FileSystem, p string) (string, error)
-	HasDiskSpace  func(fs FileSystem) bool
+	PathValidator func(fs *FileSystem, p string) (string, error)
+	HasDiskSpace  func(fs *FileSystem) bool
 
 	logger *zap.SugaredLogger
 	lock   sync.Mutex
 }
 
-func (fs FileSystem) buildPath(p string) (string, error) {
+func (fs *FileSystem) buildPath(p string) (string, error) {
 	return fs.PathValidator(fs, p)
 }
 
 const (
-	PermissionFileRead        = "file.read"
+	// PermissionFileRead ... Permission to read a file.
+	PermissionFileRead = "file.read"
+	// PermissionFileReadContent ... Permission to read the contents of a file.
 	PermissionFileReadContent = "file.read-content"
-	PermissionFileCreate      = "file.create"
-	PermissionFileUpdate      = "file.update"
-	PermissionFileDelete      = "file.delete"
+	// PermissionFileCreate ... Permission to create a file.
+	PermissionFileCreate = "file.create"
+	// PermissionFileUpdate ... Permission to update a file.
+	PermissionFileUpdate = "file.update"
+	// PermissionFileDelete ... Permission to delete a file.
+	PermissionFileDelete = "file.delete"
 )
 
 // Fileread creates a reader for a file on the system and returns the reader back.
-func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
+func (fs *FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 	// Check first if the user can actually open and view a file. This permission is named
 	// really poorly, but it is checking if they can read. There is an addition permission,
 	// "save-files" which determines if they can write that file.
@@ -68,7 +75,7 @@ func (fs FileSystem) Fileread(request *sftp.Request) (io.ReaderAt, error) {
 }
 
 // Filewrite handles the write actions for a file on the system.
-func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
+func (fs *FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	if fs.ReadOnly {
 		return nil, sftp.ErrSshFxOpUnsupported
 	}
@@ -81,7 +88,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 	// If the user doesn't have enough space left on the server it should respond with an
 	// error since we won't be letting them write this file to the disk.
 	if !fs.HasDiskSpace(fs) {
-		return nil, ErrSshQuotaExceeded
+		return nil, ErrSSHQuotaExceeded
 	}
 
 	fs.lock.Lock()
@@ -115,7 +122,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 
 		// Not failing here is intentional. We still made the file, it is just owned incorrectly
 		// and will likely cause some issues.
-		if err := os.Chown(p, fs.User.Uid, fs.User.Gid); err != nil {
+		if err := os.Chown(p, fs.User.UID, fs.User.GID); err != nil {
 			fs.logger.Warnw("error chowning file", zap.String("file", p), zap.Error(err))
 		}
 
@@ -156,7 +163,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 
 	// Not failing here is intentional. We still made the file, it is just owned incorrectly
 	// and will likely cause some issues.
-	if err := os.Chown(p, fs.User.Uid, fs.User.Gid); err != nil {
+	if err := os.Chown(p, fs.User.UID, fs.User.GID); err != nil {
 		fs.logger.Warnw("error chowning file", zap.String("file", p), zap.Error(err))
 	}
 
@@ -165,7 +172,7 @@ func (fs FileSystem) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 
 // Filecmd hander for basic SFTP system calls related to files, but not anything to do with reading
 // or writing to those files.
-func (fs FileSystem) Filecmd(request *sftp.Request) error {
+func (fs *FileSystem) Filecmd(request *sftp.Request) error {
 	if fs.ReadOnly {
 		return sftp.ErrSshFxOpUnsupported
 	}
@@ -286,7 +293,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 	// Not failing here is intentional. We still made the file, it is just owned incorrectly
 	// and will likely cause some issues. There is no logical check for if the file was removed
 	// because both of those cases (Rmdir, Remove) have an explicit return rather than break.
-	if err := os.Chown(fileLocation, fs.User.Uid, fs.User.Gid); err != nil {
+	if err := os.Chown(fileLocation, fs.User.UID, fs.User.GID); err != nil {
 		fs.logger.Warnw("error chowning file", zap.String("file", fileLocation), zap.Error(err))
 	}
 
@@ -295,7 +302,7 @@ func (fs FileSystem) Filecmd(request *sftp.Request) error {
 
 // Filelist is the handler for SFTP filesystem list calls. This will handle calls to list the contents of
 // a directory as well as perform file/folder stat calls.
-func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
+func (fs *FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 	p, err := fs.buildPath(request.Filepath)
 	if err != nil {
 		return nil, sftp.ErrSshFxNoSuchFile
@@ -340,7 +347,7 @@ func (fs FileSystem) Filelist(request *sftp.Request) (sftp.ListerAt, error) {
 
 // Determines if a user has permission to perform a specific action on the SFTP server. These
 // permissions are defined and returned by the Panel API.
-func (fs FileSystem) can(permission string) bool {
+func (fs *FileSystem) can(permission string) bool {
 	// Server owners and super admins have their permissions returned as '[*]' via the Panel
 	// API, so for the sake of speed do an initial check for that before iterating over the
 	// entire array of permissions.
