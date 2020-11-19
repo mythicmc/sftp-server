@@ -4,9 +4,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/big"
+	"path"
+	"strings"
 )
 
 type config struct {
@@ -45,7 +48,12 @@ func main() {
 			GID: conf.User.GID,
 		},
 		PathValidator: func(fs *FileSystem, p string) (string, error) {
-			return p, nil // TODO
+			join := path.Join(conf.Filepath, p)
+			clean := path.Clean(conf.Filepath)
+			if strings.HasPrefix(join, clean) {
+				return join, nil
+			}
+			return "", errors.New("invalid path outside the configured directory was provided")
 		},
 		DiskSpaceValidator: func(fs *FileSystem) bool {
 			return true // TODO
